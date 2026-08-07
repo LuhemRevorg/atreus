@@ -27,7 +27,7 @@ def wake():
                 t=time.time()-curr
                 if prediction[key] > 0.002 and t >= 1: # Threshold
                     curr=time.time()
-                    print(f"atreus {prediction[key]}")
+                    return
     except KeyboardInterrupt:
         pass
     finally:
