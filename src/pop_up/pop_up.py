@@ -7,6 +7,7 @@ from PIL import Image, ImageSequence
 SPRITE = "assets/atreus_idle_8x_1.png"
 MARGIN = 24
 
+# Good portion of the stuff here is Claude so beware user! Works alright.
 
 def _load_frames(sprite_path):
     """Flatten an animated GIF/APNG into [(png_bytes, seconds)] plus its size.
@@ -105,14 +106,10 @@ def pop_up(sprite_path=SPRITE, margin=MARGIN):
         schedule(frames[index][1])
 
     def schedule(delay):
-        # Re-armed each tick so per-frame durations are honoured.
         NSTimer.scheduledTimerWithTimeInterval_repeats_block_(delay, False, advance)
 
     schedule(frames[0][1])
 
-    # NSApp.run() is Objective-C code, so a plain Python signal handler never
-    # gets a chance to run and Ctrl+C is swallowed. MachSignals installs the
-    # handler at the Mach level, which can actually break the Cocoa run loop.
     from PyObjCTools import AppHelper, MachSignals
 
     interrupted = False
