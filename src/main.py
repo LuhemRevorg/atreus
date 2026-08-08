@@ -7,6 +7,7 @@ from wake import wake
 from llama import llama
 from stt import stt
 from tts import tts
+from pop_up import pop_up
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,7 +29,8 @@ def main():
     log.info("atreus listening")
     while True:
         try:
-            wake()
+            #wake()
+            pop_up()
             text = stt()
             log.info("heard: %s", text)
             res = llama(text)
