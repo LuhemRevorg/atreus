@@ -2,6 +2,7 @@ import logging
 import signal
 import sys
 import time
+from multiprocessing import Process
 
 from wake import wake
 from llama import llama
@@ -21,6 +22,13 @@ def shutdown(signum, frame):
     log.info("got signal %s, exiting", signum)
     sys.exit(0)
 
+def agent():
+    text = stt()
+    log.info("heard: %s", text)
+    res = llama(text)
+    log.info("said: %s", res)
+    tts(res)
+
 
 def main():
     signal.signal(signal.SIGTERM, shutdown)
@@ -29,13 +37,15 @@ def main():
     log.info("atreus listening")
     while True:
         try:
-            #wake()
-            pop_up()
-            text = stt()
-            log.info("heard: %s", text)
-            res = llama(text)
-            log.info("said: %s", res)
-            tts(res)
+            wake()
+            p1 = Process(target=agent)
+            
+            p2 = Process(target=pop_up)
+            p1.start()   
+            p2.start()
+            p1.join()
+            p2.join()
+            
         except Exception:
             log.exception("cycle failed, retrying")
             time.sleep(2)
