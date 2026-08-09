@@ -23,12 +23,19 @@ def shutdown(signum, frame):
     sys.exit(0)
 
 def agent():
-    text = stt()
-    log.info("heard: %s", text)
-    res = llama(text)
-    log.info("said: %s", res)
-    tts(res)
-
+    while True:
+        try:
+            #text = stt()
+            #log.info("heard: %s", text)
+            text="Hello There! Who's responsible for this famous meme?"
+            res = llama(text)
+            log.info("said: %s", res)
+            tts(res)
+        except KeyboardInterrupt:
+            return
+        except TimeoutError:
+            return
+        
 
 def main():
     signal.signal(signal.SIGTERM, shutdown)
@@ -37,15 +44,16 @@ def main():
     log.info("atreus listening")
     while True:
         try:
-            wake()
+            #wake()
             p1 = Process(target=agent)
-            
             p2 = Process(target=pop_up)
-            p1.start()   
+            p1.start()
             p2.start()
-            p1.join()
-            p2.join()
             
+            p1.join()
+            p2.kill()
+            break
+        
         except Exception:
             log.exception("cycle failed, retrying")
             time.sleep(2)
