@@ -27,7 +27,6 @@ def agent():
         try:
             text = stt()
             log.info("heard: %s", text)
-            text="Hello There! Who's responsible for this famous meme?"
             res = llama(text)
             log.info("said: %s", res)
             tts(res)

@@ -4,6 +4,7 @@ from . import tools
 
 TOOLS = {
     'end_conversation': tools.end_conversation,
+    'claude': tools.claude,
 }
 
 session_messages= [
