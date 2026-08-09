@@ -25,8 +25,8 @@ def shutdown(signum, frame):
 def agent():
     while True:
         try:
-            #text = stt()
-            #log.info("heard: %s", text)
+            text = stt()
+            log.info("heard: %s", text)
             text="Hello There! Who's responsible for this famous meme?"
             res = llama(text)
             log.info("said: %s", res)
@@ -44,7 +44,7 @@ def main():
     log.info("atreus listening")
     while True:
         try:
-            #wake()
+            wake()
             p1 = Process(target=agent)
             p2 = Process(target=pop_up)
             p1.start()
