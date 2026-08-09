@@ -1,5 +1,7 @@
 # atreus
 
+![Atreus GIF](./assets/atreus_shoot_8x_1.png)
+
 Local Agent Orchestrator
 Running local agents on my Mac
 Holds tools and what not
