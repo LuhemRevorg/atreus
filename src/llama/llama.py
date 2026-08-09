@@ -31,7 +31,7 @@ def llama(message: str):
     while True:
         response: ChatResponse = chat(model="qwen3:8b", messages=session_messages, think=False, tools=TOOLS.values())
         session_messages.append(response['message'])
-
+        # TODO: if tool fails and throws error(except EndConversartion) that should be appended
         if response.message.tool_calls:
             for tc in response.message.tool_calls:
                 if tc.function.name in TOOLS:
@@ -42,7 +42,7 @@ def llama(message: str):
                     session_messages.append({'role': 'tool', 'tool_name': tc.function.name, 'content': str(result)})
                 else:
                     session_messages.append({'role': 'tool', 'tool_name': tc.function.name, 'content': f'Error: Tool not found'})
-                    
+
         else:
             return response.message.content
 
