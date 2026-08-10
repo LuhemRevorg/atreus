@@ -1,9 +1,7 @@
 import os
 import time
-import subprocess
 from . import tflite_compat
 tflite_compat.install()
-import openwakeword
 from openwakeword.model import Model
 import pyaudio
 import numpy as np

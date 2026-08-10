@@ -1,10 +1,12 @@
 from ollama import chat
 from ollama import ChatResponse
+import importlib
 from . import tools
 
 TOOLS = {
     'end_conversation': tools.end_conversation,
     'claude': tools.claude,
+    'bash': tools.bash,
 }
 
 session_messages= [
@@ -30,7 +32,7 @@ def llama(message: str):
         }
     )
     while True:
-        response: ChatResponse = chat(model="qwen3:8b", messages=session_messages, think=False, tools=TOOLS.values())
+        response: ChatResponse = chat(model="qwen3:14b", messages=session_messages, think=False, tools=TOOLS.values())
         session_messages.append(response['message'])
         # TODO: if tool fails and throws error(except EndConversartion) that should be appended
         if response.message.tool_calls:
@@ -41,8 +43,10 @@ def llama(message: str):
                     print(f"Result: {result}")
                     # add the tool result to the messages
                     session_messages.append({'role': 'tool', 'tool_name': tc.function.name, 'content': str(result)})
+                    if tc.function.name=='claude':
+                        importlib.reload(TOOLS)
                 else:
-                    session_messages.append({'role': 'tool', 'tool_name': tc.function.name, 'content': f'Error: Tool not found'})
+                    session_messages.append({'role': 'tool', 'tool_name': tc.function.name, 'content': 'Error: Tool not found'})
 
         else:
             return response.message.content
