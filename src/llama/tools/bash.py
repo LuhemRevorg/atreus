@@ -55,7 +55,7 @@ def bash(command: str, cwd: str = "") -> str:
     answers the question directly, and read the output back in a sentence rather
     than reciting it. Do NOT use it to write or build new code or new tools --
     that is what the claude tool is for -- and do NOT use it for questions you
-    can simply answer yourself.
+    can simply answer yourself. You may use this tool to figure out 
 
     Args:
         command: The shell command to run, e.g. "ls ~/Desktop" or "git status".

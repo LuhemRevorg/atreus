@@ -1,3 +1,3 @@
-from .stt import stt
+from .stt import STT
 
-__all__ = ["stt"]
+__all__ = ["STT"]

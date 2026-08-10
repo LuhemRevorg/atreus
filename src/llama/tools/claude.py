@@ -29,7 +29,7 @@ def claude(request: str, cwd: str | None):
     Args:
         request: A description of what Claude should build: what it should do,
             what inputs it takes and what it should produce.
-        cwd: Path of the directroy to build in leave empty if asked to build a tool for you
+        cwd: Path of the directory to build in leave empty if asked to build a tool for you
     '''
 
     options = ClaudeAgentOptions(

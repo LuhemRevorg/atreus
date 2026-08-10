@@ -1,5 +1,7 @@
-from .end_conversation import end_conversation
-from .claude import claude
-from .bash import bash
+"""Tools available to Atreus.
 
-__all__ = ['end_conversation', 'claude', 'bash']
+Modules here are discovered at runtime by llama.load_tools(), so nothing needs
+to be imported or listed in this file -- adding a module is enough. Each module
+exposes one function named after it, with a docstring and type hints, since
+ollama derives the tool schema from those.
+"""

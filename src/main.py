@@ -6,8 +6,8 @@ from multiprocessing import Process
 
 from wake import wake
 from llama import llama
-from stt import stt
-from tts import tts
+from stt import STT
+from tts import TTS
 from pop_up import pop_up
 
 logging.basicConfig(
@@ -23,13 +23,17 @@ def shutdown(signum, frame):
     sys.exit(0)
 
 def agent():
+    stt = STT()
+    tts = TTS()
     while True:
         try:
-            text = stt()
+            text = stt.req()
             log.info("heard: %s", text)
             res = llama(text)
             log.info("said: %s", res)
-            tts(res)
+            stt.mute()
+            tts.res(res)
+            stt.unmute()
         except KeyboardInterrupt:
             return
         except TimeoutError:

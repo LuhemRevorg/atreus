@@ -1,3 +1,3 @@
-from .tts import tts
+from .tts import TTS
 
-__all__ = ["tts"]
+__all__ = ["TTS"]
