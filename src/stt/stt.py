@@ -10,8 +10,12 @@ class STT:
         return text
     def mute(self):
         self.recorder.set_microphone(False)
+
     def unmute(self):
         self.recorder.clear_audio_queue()
         self.recorder.set_microphone(True)
+    
+    def shutdown(self):
+        self.recorder.shutdown()
 
 

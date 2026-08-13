@@ -34,10 +34,12 @@ def agent():
             stt.mute()
             tts.res(res)
             stt.unmute()
+            print("deeedede")
         except KeyboardInterrupt:
             return
         except TimeoutError:
-            return
+            break
+    stt.shutdown()
         
 
 def main():
@@ -45,21 +47,19 @@ def main():
     signal.signal(signal.SIGINT, shutdown)
 
     log.info("atreus listening")
-    while True:
-        try:
-            wake()
-            p1 = Process(target=agent)
-            p2 = Process(target=pop_up)
-            p1.start()
-            p2.start()
-            
-            p1.join()
-            p2.kill()
-            break
+
+    try:
+        wake()
+        p1 = Process(target=agent)
+        p2 = Process(target=pop_up)
+        p1.start()
+        p2.start()
+        p1.join()
+        p2.kill()
         
-        except Exception:
-            log.exception("cycle failed, retrying")
-            time.sleep(2)
+    except Exception:
+        log.exception("End convo")
+        return
 
 
 if __name__=="__main__":

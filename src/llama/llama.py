@@ -100,7 +100,7 @@ def llama(message: str):
         }
     )
     while True:
-        response: ChatResponse = chat(model="qwen3:8b", messages=session_messages, think=True, tools=TOOLS.values())
+        response: ChatResponse = chat(model="qwen3:8b", messages=session_messages, think=False, tools=TOOLS.values())
         session_messages.append(response['message'])
         claude_contains = False
         if response.message.tool_calls:
@@ -120,6 +120,8 @@ def llama(message: str):
                         result = future.result()
                         session_messages.append({'role': 'tool', 'tool_name': tc.function.name, 'content': str(result)})
                     except TimeoutError as e:
+                        print("\n--- Initiating pool-wide shutdown! ---")
+                        executor.shutdown(wait=False, cancel_futures=True)
                         raise TimeoutError
                     except Exception as e:
                         session_messages.append({'role': 'tool', 'tool_name': tc.function.name, 'content': f'Error: {e}'})
