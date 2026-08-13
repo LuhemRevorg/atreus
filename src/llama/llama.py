@@ -100,7 +100,7 @@ def llama(message: str):
         }
     )
     while True:
-        response: ChatResponse = chat(model="qwen3:8b", messages=session_messages, think=False, tools=TOOLS.values())
+        response: ChatResponse = chat(model="qwen3:8b", messages=session_messages, think=True, tools=TOOLS.values())
         session_messages.append(response['message'])
         claude_contains = False
         if response.message.tool_calls:
