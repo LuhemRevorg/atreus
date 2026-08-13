@@ -14,15 +14,11 @@ def load_tools():
     Called again after the claude tool runs, so a tool it just wrote is picked up
     without a restart.
     """
-    # Cheap insurance: FileFinder refreshes on directory mtime, which can miss a
-    # file written in the same tick as the last cache fill.
     importlib.invalidate_caches()
     TOOLS.clear()
     for info in pkgutil.iter_modules(tools.__path__):
         name = f"{tools.__name__}.{info.name}"
         try:
-            # reload re-executes the module body, so only use it on modules we
-            # already have -- otherwise a fresh import would run twice.
             if name in sys.modules:
                 module = importlib.reload(sys.modules[name])
             else:
@@ -60,7 +56,7 @@ def llama(message: str):
         }
     )
     while True:
-        response: ChatResponse = chat(model="qwen3:8b", messages=session_messages, think=False, tools=TOOLS.values())
+        response: ChatResponse = chat(model="qwen3:8b", messages=session_messages, think=True, tools=TOOLS.values())
         session_messages.append(response['message'])
         # TODO: if tool fails and throws error(except EndConversartion) that should be appended
         if response.message.tool_calls:
