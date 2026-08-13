@@ -39,6 +39,3 @@ with exit 126 before Python even starts.
 The plist is generated from `scripts/com.atreus.agent.plist.template`, with the
 repo and home paths substituted in. Re-run `install-agent.sh` if the repo moves
 -- editing the loaded plist in place does nothing, launchd caches it.
-
-hello
-

@@ -28,7 +28,6 @@ def agent():
     while True:
         try:
             text = stt.req()
-            text = "call tool claude to add hello to README.md and when done confirm then end conversation"
             log.info("heard: %s", text)
             res = llama(text)
             log.info("said: %s", res)

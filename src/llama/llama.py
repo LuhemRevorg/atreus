@@ -62,6 +62,8 @@ session_messages= [
             "- Pick the tool whose description fits the request. If nothing fits and "
             "the user wants something built, that is the claude tool.\n"
             "- Need several tools? Call them in the same turn; they run at once.\n"
+            "Never call end_conversation tool with any other tool as it instantly ends conversation"
+            "always call it seprately\n"
             "- Report only what a tool actually returned. If one failed, say so "
             "briefly and plainly. Never invent a result or claim work you did not do.\n"
             "- A tool that failed or does not exist will fail the same way twice. Do "
