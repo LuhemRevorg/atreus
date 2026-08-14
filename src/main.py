@@ -34,8 +34,8 @@ def agent():
             stt.mute()
             tts.res(res)
             stt.unmute()
-            print("deeedede")
-        except:
+        except Exception as e:
+            print(e)
             break
             
     stt.shutdown()

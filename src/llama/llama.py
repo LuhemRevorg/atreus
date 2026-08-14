@@ -38,7 +38,7 @@ def load_tools():
             TOOLS[info.name] = fn
 
 load_tools()
-SYSTEM_PROMPT= Path("SYSTEMPROMPT.txt").read_text(encoding="utf-8")
+SYSTEM_PROMPT= (Path(__file__).parent / "SYSTEMPROMPT.txt").read_text(encoding="utf-8")
 session_messages= [
     {
         'role': 'system',
