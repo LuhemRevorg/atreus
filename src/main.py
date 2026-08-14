@@ -49,7 +49,7 @@ def main():
     log.info("atreus listening")
 
     try:
-        #wake()
+        wake()
         p1 = Process(target=agent)
         p2 = Process(target=pop_up)
         p1.start()
