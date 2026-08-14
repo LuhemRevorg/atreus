@@ -35,10 +35,9 @@ def agent():
             tts.res(res)
             stt.unmute()
             print("deeedede")
-        except KeyboardInterrupt:
-            return
-        except TimeoutError:
+        except:
             break
+            
     stt.shutdown()
         
 
