@@ -31,15 +31,10 @@ def agent():
             log.info("heard: %s", text)
             res = llama(text)
             log.info("said: %s", res)
-            stt.mute()
             tts.res(res)
-            stt.unmute()
         except Exception as e:
             print(e)
             break
-            
-    stt.shutdown()
-        
 
 def main():
     signal.signal(signal.SIGTERM, shutdown)
@@ -48,7 +43,7 @@ def main():
     log.info("atreus listening")
 
     try:
-        wake()
+       # wake()
         p1 = Process(target=agent)
         p2 = Process(target=pop_up)
         p1.start()

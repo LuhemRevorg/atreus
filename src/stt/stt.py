@@ -92,13 +92,9 @@ class STT:
         if not self.__record('what_i_said.wav'):
             return {"text": ""}
         result = self.recorder.transcribe('what_i_said.wav', language='en')
-        return result
-    def mute(self):
-        self.recorder.set_microphone(False)
+        print(result)
+        return result['segments'][0]['text']
 
-    def unmute(self):
-        self.recorder.clear_audio_queue()
-        self.recorder.set_microphone(True)
     
     def shutdown(self):
         self.recorder.shutdown()
