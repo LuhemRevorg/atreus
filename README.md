@@ -2,8 +2,8 @@
 
 ![Atreus GIF](./assets/atreus_shoot_8x_1.png)
 
-Local Agent Orchestrator
-Running local agents on my Mac
+Local AI Assitant
+I run qwen3:8b(think=True)
 Holds tools and what not
 
 P.S. Atreus is GoW reference
