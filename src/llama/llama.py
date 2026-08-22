@@ -1,6 +1,5 @@
 from ollama import chat
 from ollama import ChatResponse
-from pathlib import Path
 import importlib
 import pkgutil
 import sys
@@ -38,15 +37,10 @@ def load_tools():
             TOOLS[info.name] = fn
 
 load_tools()
-SYSTEM_PROMPT= (Path(__file__).parent / "SYSTEMPROMPT.txt").read_text(encoding="utf-8")
-session_messages= [
-    {
-        'role': 'system',
-        'content': SYSTEM_PROMPT,
-    }
-]
 
-def llama(message: str):
+
+
+def llama(message: str, session_messages):
     # Users request a.k.a. me
     session_messages.append(
         {
