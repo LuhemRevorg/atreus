@@ -19,15 +19,23 @@ SYSTEM_PROMPT = (Path(__file__).parent / ".." / "SYSTEMPROMPT.txt").read_text(en
 
 
 def _default_responder():
-    """A `str -> str` callable holding its own conversation history."""
+    """A `(respond, new_chat)` pair sharing their own conversation history.
+
+    `new_chat` rebinds rather than clearing in place: a `llama` call that is
+    still running keeps appending to the list it was handed, and must not
+    scribble into the fresh conversation.
+    """
     from llama import llama
 
-    session = [{"role": "system", "content": SYSTEM_PROMPT}]
+    state = {"messages": [{"role": "system", "content": SYSTEM_PROMPT}]}
 
     def respond(text):
-        return llama(text, session)
+        return llama(text, state["messages"])
 
-    return respond
+    def new_chat():
+        state["messages"] = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+    return respond, new_chat
 
 
 class _StatusItemTarget(NSObject):
@@ -64,16 +72,17 @@ class _StatusItemTarget(NSObject):
 
 class top_bar(rumps.App):
     def __init__(self, name="Atreus", title=None, icon=ICON_PATH, responder=None,
-                 template=None, menu=None, quit_button="Quit"):
+                 on_new_chat=None, template=None, menu=None, quit_button="Quit"):
         super().__init__(name, title, icon, template, menu, quit_button)
         self._responder = responder
+        self._on_new_chat = on_new_chat
         self._panel = None
         self._target = None
 
-    @rumps.clicked("Clear chat")
-    def clear_chat(self, _sender):
+    @rumps.clicked("New Chat")
+    def new_chat(self, _sender):
         if self._panel is not None:
-            self._panel.clear()
+            self._panel.new_chat()
 
     def _install(self):
         """Runs once the status item exists but before the event loop starts."""
@@ -82,8 +91,11 @@ class top_bar(rumps.App):
             NSApplicationActivationPolicyAccessory
         )
 
-        responder = self._responder or _default_responder()
-        self._panel = ChatPanel.alloc().initWithResponder_(responder)
+        if self._responder is None:
+            responder, on_new_chat = _default_responder()
+        else:
+            responder, on_new_chat = self._responder, (self._on_new_chat or (lambda: None))
+        self._panel = ChatPanel.alloc().initWithResponder_onNewChat_(responder, on_new_chat)
 
         status_item = self._nsapp.nsstatusitem
         menu = self._menu._menu

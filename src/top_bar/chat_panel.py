@@ -14,9 +14,12 @@ from AppKit import (
     NSApplication,
     NSAttributedString,
     NSBezelBorder,
+    NSBezelStyleInline,
+    NSButton,
     NSColor,
     NSFont,
     NSFontWeightSemibold,
+    NSFocusRingTypeNone,
     NSPopover,
     NSPopoverBehaviorTransient,
     NSScrollView,
@@ -26,6 +29,7 @@ from AppKit import (
     NSViewController,
     NSViewWidthSizable,
     NSViewHeightSizable,
+    NSViewMinXMargin,
     NSViewMinYMargin,
     NSTextFieldRoundedBezel,
 )
@@ -41,6 +45,7 @@ WIDTH = 380
 HEIGHT = 460
 PAD = 12
 INPUT_HEIGHT = 26
+HEADER_HEIGHT = 22
 
 THINKING = "thinking…"
 
@@ -66,16 +71,21 @@ class ChatPanel(NSObject):
     """Owns the popover, the transcript view and the input field.
 
     `responder` is a blocking ``str -> str`` callable (the LLM). It is run off
-    the main thread so the UI keeps drawing while the model thinks.
+    the main thread so the UI keeps drawing while the model thinks. `on_new_chat`
+    is called when the user starts over, and is what drops the old history.
     """
 
-    def initWithResponder_(self, responder):
+    def initWithResponder_onNewChat_(self, responder, on_new_chat):
         self = objc.super(ChatPanel, self).init()
         if self is None:
             return None
 
         self._responder = responder
+        self._on_new_chat = on_new_chat
         self._busy = False
+        # Bumped on every new chat. A reply that was already in flight carries
+        # the generation it was asked under, and is dropped if that has moved on.
+        self._generation = 0
         # A transient popover dismisses itself on the same click that fires the
         # status item's action, so a click while open would close and instantly
         # reopen it. Remember when it closed and swallow that follow-up click.
@@ -97,9 +107,22 @@ class ChatPanel(NSObject):
         self._input.setAction_("send:")
         root.addSubview_(self._input)
 
+        header_y = HEIGHT - PAD - HEADER_HEIGHT
+        new_chat = NSButton.buttonWithTitle_target_action_("New Chat", self, "newChat:")
+        new_chat.setBezelStyle_(NSBezelStyleInline)
+        new_chat.setFont_(NSFont.systemFontOfSize_(11))
+        new_chat.setFocusRingType_(NSFocusRingTypeNone)
+        new_chat.sizeToFit()
+        size = new_chat.frame().size
+        new_chat.setFrame_(
+            NSMakeRect(WIDTH - PAD - size.width, header_y, size.width, HEADER_HEIGHT)
+        )
+        new_chat.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
+        root.addSubview_(new_chat)
+
         scroll_y = PAD + INPUT_HEIGHT + 8
         scroll = NSScrollView.alloc().initWithFrame_(
-            NSMakeRect(PAD, scroll_y, WIDTH - 2 * PAD, HEIGHT - scroll_y - PAD)
+            NSMakeRect(PAD, scroll_y, WIDTH - 2 * PAD, header_y - scroll_y - 6)
         )
         scroll.setHasVerticalScroller_(True)
         scroll.setAutohidesScrollers_(True)
@@ -107,16 +130,16 @@ class ChatPanel(NSObject):
         scroll.setDrawsBackground_(False)
         scroll.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
 
-        size = scroll.contentSize()
+        inner = scroll.contentSize()
         text = NSTextView.alloc().initWithFrame_(
-            NSMakeRect(0, 0, size.width, size.height)
+            NSMakeRect(0, 0, inner.width, inner.height)
         )
-        text.setMinSize_(NSMakeSize(0, size.height))
+        text.setMinSize_(NSMakeSize(0, inner.height))
         text.setMaxSize_(NSMakeSize(UNBOUNDED, UNBOUNDED))
         text.setVerticallyResizable_(True)
         text.setHorizontallyResizable_(False)
         text.setAutoresizingMask_(NSViewWidthSizable)
-        text.textContainer().setContainerSize_(NSMakeSize(size.width, UNBOUNDED))
+        text.textContainer().setContainerSize_(NSMakeSize(inner.width, UNBOUNDED))
         text.textContainer().setWidthTracksTextView_(True)
         text.setEditable_(False)
         text.setSelectable_(True)
@@ -175,11 +198,30 @@ class ChatPanel(NSObject):
 
     # -- transcript ---------------------------------------------------------
 
+    def newChat_(self, _sender):
+        self.new_chat()
+
     @objc.python_method
-    def clear(self):
+    def new_chat(self):
+        """Wipe the transcript and the history behind it, and start over.
+
+        A reply that is still in flight belongs to the old conversation, so the
+        generation bump makes `_deliver` throw it away when it arrives.
+        """
+        self._generation += 1
+        self._busy = False
+        self._pending_range = None
+
         storage = self._text.textStorage()
         storage.deleteCharactersInRange_(NSMakeRange(0, storage.length()))
-        self._pending_range = None
+
+        self._on_new_chat()
+
+        self._input.setStringValue_("")
+        self._input.setEnabled_(True)
+        window = self._text.window()
+        if window is not None:
+            window.makeFirstResponder_(self._input)
 
     @objc.python_method
     def _append(self, name, name_color, body):
@@ -214,19 +256,24 @@ class ChatPanel(NSObject):
 
         self._busy = True
         self._input.setEnabled_(False)
-        threading.Thread(target=self._work, args=(text,), daemon=True).start()
+        threading.Thread(
+            target=self._work, args=(text, self._generation), daemon=True
+        ).start()
 
     @objc.python_method
-    def _work(self, text):
+    def _work(self, text, generation):
         """Runs on a worker thread -- never touch AppKit from here."""
         try:
             reply = self._responder(text)
         except Exception as e:
             reply = f"[error] {e}"
-        AppHelper.callAfter(self._deliver, reply)
+        AppHelper.callAfter(self._deliver, reply, generation)
 
     @objc.python_method
-    def _deliver(self, reply):
+    def _deliver(self, reply, generation):
+        if generation != self._generation:
+            # Answer to a conversation the user has since thrown away.
+            return
         if self._pending_range is not None:
             self._text.textStorage().deleteCharactersInRange_(self._pending_range)
             self._pending_range = None

@@ -48,20 +48,19 @@ def voice_agent():
     p2.kill()
 
 def text_agent():
-    session_messages = [
-        {
-            'role': 'system',
-            'content': SYSTEM_PROMPT,
-        }
-    ]
+    state = {'messages': [{'role': 'system', 'content': SYSTEM_PROMPT}]}
 
     def respond(text):
         log.info("typed: %s", text)
-        res = llama(text, session_messages)
+        res = llama(text, state['messages'])
         log.info("replied: %s", res)
         return res
 
-    top_bar(responder=respond).run()
+    def new_chat():
+        log.info("new chat")
+        state['messages'] = [{'role': 'system', 'content': SYSTEM_PROMPT}]
+
+    top_bar(responder=respond, on_new_chat=new_chat).run()
 
 
 def main():
