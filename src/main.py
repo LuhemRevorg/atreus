@@ -9,6 +9,7 @@ from llama import llama
 from stt import STT
 from tts import TTS
 from pop_up import pop_up
+from top_bar import top_bar
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,6 +33,8 @@ def voice_agent():
         }
     ]
     wake()
+    p2 = Process(target=pop_up)
+    p2.start()
     while True:
         try:
             text = stt.req()
@@ -42,10 +45,23 @@ def voice_agent():
         except Exception as e:
             print(e)
             break
+    p2.kill()
 
 def text_agent():
-    
-    return
+    session_messages = [
+        {
+            'role': 'system',
+            'content': SYSTEM_PROMPT,
+        }
+    ]
+
+    def respond(text):
+        log.info("typed: %s", text)
+        res = llama(text, session_messages)
+        log.info("replied: %s", res)
+        return res
+
+    top_bar(responder=respond).run()
 
 
 def main():
@@ -56,14 +72,11 @@ def main():
 
     try:
         p1 = Process(target=voice_agent)
-        p2 = Process(target=pop_up)
         p3 = Process(target=text_agent)
         p1.start()
-        p2.start()
         p3.start()
         p1.join()
         p3.join()
-        p2.kill()
         
     except Exception:
         log.exception("End convo")

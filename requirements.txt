@@ -16,6 +16,7 @@ claude-agent-sdk
 
 # macOS UI (AppKit / Foundation / PyObjCTools)
 pyobjc-framework-Cocoa
+rumps                   # menu bar status item
 
 # misc
 numpy
