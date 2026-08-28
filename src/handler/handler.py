@@ -2,7 +2,7 @@ from pathlib import Path
 
 from llama import llama
 
-from .request import Request
+from .request import DELETE_CHAT, Request
 from .response import Response
 
 SYSTEM_PROMPT = (Path(__file__).parent / ".." / "SYSTEMPROMPT.txt").read_text(encoding="utf-8")
@@ -22,6 +22,9 @@ class Handler:
     def handle_reqs(self):
         while True:
             req = self.req_queue.get()
+            if req.type == DELETE_CHAT:
+                self.delete_chat(req.id)
+                continue
             chat = self.chats.setdefault(
                 req.id, [{"role": "system", "content": SYSTEM_PROMPT}]
             )
@@ -31,3 +34,6 @@ class Handler:
                 res = f"[error] {e}"
             queue = self.res_text_queue if req.type == "text" else self.res_voice_queue
             queue.put(Response(res=res, id=req.id))
+
+    def delete_chat(self, id):
+        self.chats.pop(id, None)

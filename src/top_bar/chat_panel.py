@@ -56,6 +56,7 @@ INPUT_HEIGHT = 26
 HEADER_HEIGHT = 22
 ARROW_WIDTH = 18
 COUNTER_WIDTH = 84
+CHIP_GAP = 6
 
 THINKING = "thinking…"
 
@@ -94,29 +95,35 @@ def _chip(title, target, action):
 class ChatPanel(NSObject):
     """Owns the popover, the transcript view and the input field.
 
-    The panel talks to the request handler through three callables, and never
+    The panel talks to the request handler through four callables, and never
     blocks on any of them:
 
     * ``responder(text, chat_id)`` -- hand a message to the handler and return
       immediately. The reply comes back later, through ``poll``.
     * ``on_new_chat() -> chat_id`` -- start a fresh conversation on the backend
       and return the id it filed it under. Must return that id.
+    * ``on_delete_chat(chat_id)`` -- drop that conversation on the backend.
     * ``poll() -> iterable of (chat_id, reply)`` -- drain whatever replies are
       ready, without waiting. Called on a timer on the main thread.
 
     Every conversation the backend holds is mirrored here as one entry in
     ``_chats``, keyed by the same id, so a reply that lands while the user is
-    reading a different chat is still filed in the right transcript. The backend
-    is assumed to start with exactly one chat, ``INITIAL_CHAT_ID``.
+    reading a different chat is still filed in the right transcript. Keying by
+    id rather than position is what makes deletion cheap: closing one chat
+    leaves every other id exactly where it was. The backend is assumed to start
+    with exactly one chat, ``INITIAL_CHAT_ID``.
     """
 
-    def initWithResponder_onNewChat_onPoll_(self, responder, on_new_chat, poll):
+    def initWithResponder_onNewChat_onDeleteChat_onPoll_(
+        self, responder, on_new_chat, on_delete_chat, poll
+    ):
         self = objc.super(ChatPanel, self).init()
         if self is None:
             return None
 
         self._responder = responder
         self._on_new_chat = on_new_chat
+        self._on_delete_chat = on_delete_chat
         self._poll = poll
         # chat_id -> entry, plus the order they were created in, which is the
         # order the ‹ › buttons walk.
@@ -151,6 +158,20 @@ class ChatPanel(NSObject):
         )
         new_chat.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
         root.addSubview_(new_chat)
+
+        close = _chip("✕", self, "closeChat:")
+        close.sizeToFit()
+        close_width = close.frame().size.width
+        close.setFrame_(
+            NSMakeRect(
+                WIDTH - PAD - size.width - CHIP_GAP - close_width,
+                header_y,
+                close_width,
+                HEADER_HEIGHT,
+            )
+        )
+        close.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
+        root.addSubview_(close)
 
         prev = _chip("‹", self, "prevChat:")
         prev.setFrame_(NSMakeRect(PAD, header_y, ARROW_WIDTH, HEADER_HEIGHT))
@@ -273,6 +294,9 @@ class ChatPanel(NSObject):
     def nextChat_(self, _sender):
         self._step(1)
 
+    def closeChat_(self, _sender):
+        self.close_chat()
+
     @objc.python_method
     def new_chat(self):
         """Ask the backend for a fresh conversation and switch to it.
@@ -288,6 +312,31 @@ class ChatPanel(NSObject):
             return
         self._track(chat_id)
         self._activate(chat_id)
+
+    @objc.python_method
+    def close_chat(self):
+        """Drop the active chat, here and on the backend.
+
+        Nothing is stored by position, so the chats either side keep their ids
+        and their transcripts. A reply still in flight for this one comes back
+        tagged with an id `_deliver` no longer knows, and is dropped.
+        """
+        if self._active is None:
+            return
+        chat_id = self._active
+        index = self._order.index(chat_id)
+
+        del self._chats[chat_id]
+        self._order.pop(index)
+        self._on_delete_chat(chat_id)
+
+        # `_activate` parks the outgoing chat's draft, and skips that here
+        # because the entry it would park into is already gone.
+        if self._order:
+            self._activate(self._order[min(index, len(self._order) - 1)])
+        else:
+            # There is always a chat to type into.
+            self.new_chat()
 
     @objc.python_method
     def _track(self, chat_id):

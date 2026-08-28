@@ -12,6 +12,7 @@ from stt import STT
 from tts import TTS
 from pop_up import pop_up
 from top_bar import top_bar
+from handler import DELETE_CHAT
 from handler import Handler
 from handler import Request
 
@@ -29,9 +30,9 @@ def shutdown(signum, frame):
 
 INITIAL_CHAT_ID = 0
 
-def voice_agent():
+def voice_agent(req_queue, res_queue):
     stt = STT()
-    tts = TTS()
+    tts = TTS()  
     session_messages= [
         {
             'role': 'system',
@@ -76,8 +77,17 @@ def text_agent(req_queue, res_queue):
             replies.append((res.id, res.res))
         return replies
 
-    top_bar(responder=respond, on_new_chat=new_chat, on_poll=poll).run()
+    def delete_chat(id):
+        log.info("delete chat %s", id)
+        req_queue.put(Request(type=DELETE_CHAT, message=None, id=id))
 
+    top_bar(
+        responder=respond,
+        on_new_chat=new_chat,
+        on_delete_chat=delete_chat,
+        on_poll=poll,
+    ).run()
+x
 
 def main():
     signal.signal(signal.SIGTERM, shutdown)
