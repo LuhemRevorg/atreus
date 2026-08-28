@@ -28,12 +28,24 @@ class Handler:
             chat = self.chats.setdefault(
                 req.id, [{"role": "system", "content": SYSTEM_PROMPT}]
             )
+            end = False
             try:
                 res = llama(req.message, chat)
+            except TimeoutError:
+                # end_conversation raises out through llama's tool pool as a
+                # bare TimeoutError. Nothing to say -- the session just stops.
+                res, end = None, True
             except Exception as e:
                 res = f"[error] {e}"
-            queue = self.res_text_queue if req.type == "text" else self.res_voice_queue
-            queue.put(Response(res=res, id=req.id))
+            self.reply(req, Response(res=res, id=req.id, end=end))
+
+    def reply(self, req, res):
+        if req.reply_to is not None:
+            req.reply_to.put(res)
+        elif req.type == "text":
+            self.res_text_queue.put(res)
+        else:
+            self.res_voice_queue.put(res)
 
     def delete_chat(self, id):
         self.chats.pop(id, None)

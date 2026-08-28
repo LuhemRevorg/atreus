@@ -3,11 +3,11 @@ import logging
 import signal
 import sys
 from pathlib import Path
-from multiprocessing import Process, Queue
+from multiprocessing import Lock, Manager, Process, Queue
 from queue import Empty
 
 from wake import wake
-from llama import llama
+from mic import Mic
 from stt import STT
 from tts import TTS
 from pop_up import pop_up
@@ -30,29 +30,69 @@ def shutdown(signum, frame):
 
 INITIAL_CHAT_ID = 0
 
-def voice_agent(req_queue, res_queue):
+def voice_agent(req_queue, mic, speaker):
     stt = STT()
-    tts = TTS()  
-    session_messages= [
-        {
-            'role': 'system',
-            'content': SYSTEM_PROMPT,
-        }
-    ]
-    wake()
-    p2 = Process(target=pop_up)
-    p2.start()
+    ids = itertools.count()
+    manager = Manager()
+    sessions = {}
+
     while True:
-        try:
+        wake(mic)
+        with mic.take():
             text = stt.req()
-            log.info("heard: %s", text)
-            res = llama(text, session_messages)
-            log.info("said: %s", res)
-            tts.res(res)
-        except Exception as e:
-            print(e)
-            break
-    p2.kill()
+        if not text:
+            continue
+
+        chat_id = f"voice-{next(ids)}"
+        log.info("heard in %s: %s", chat_id, text)
+        replies = manager.Queue()
+        session = Process(
+            target=voice_session,
+            args=(text, chat_id, replies, req_queue, mic, speaker),
+        )
+        session.start()
+        sessions[session] = replies
+
+        for done in [s for s in sessions if not s.is_alive()]:
+            done.join()
+            del sessions[done]
+
+
+def voice_session(text, chat_id, replies, req_queue, mic, speaker):
+    """Answer one spoken request, then keep the conversation going.
+
+    Runs until end_conversation fires or the user stops replying. Each follow-up
+    takes the mic back off the wake listener for as long as it takes to record.
+    """
+    tts = TTS()
+    stt = None
+    sprite = Process(target=pop_up)
+    sprite.start()
+    try:
+        while text:
+            req_queue.put(
+                Request(type="voice", message=text, id=chat_id, reply_to=replies)
+            )
+            if stt is None:
+                # Loaded here rather than up front: the handler is already
+                # working on the request, so the wait is free.
+                stt = STT()
+            res = replies.get()
+            if res.end:
+                log.info("%s ended", chat_id)
+                break
+            log.info("said in %s: %s", chat_id, res.res)
+            with speaker:
+                tts.res(res.res)
+            with mic.take():
+                text = stt.req()
+            log.info("heard in %s: %s", chat_id, text)
+    except Exception:
+        log.exception("voice session %s", chat_id)
+    finally:
+        sprite.kill()
+        req_queue.put(Request(type=DELETE_CHAT, message=None, id=chat_id))
+
 
 def text_agent(req_queue, res_queue):
     ids = itertools.count(INITIAL_CHAT_ID + 1)
@@ -87,7 +127,7 @@ def text_agent(req_queue, res_queue):
         on_delete_chat=delete_chat,
         on_poll=poll,
     ).run()
-x
+
 
 def main():
     signal.signal(signal.SIGTERM, shutdown)
@@ -97,9 +137,13 @@ def main():
 
     req_queue, res_text_queue, res_voice_queue = Queue(), Queue(), Queue()
     req_handler = Handler(req_queue, res_text_queue, res_voice_queue)
+    mic = Mic()
+    # One `say` at a time, so two sessions answering at once don't talk over
+    # each other.
+    speaker = Lock()
 
     try:
-        p1 = Process(target=voice_agent)
+        p1 = Process(target=voice_agent, args=(req_queue, mic, speaker))
         p3 = Process(target=text_agent, args=(req_queue, res_text_queue))
         p4 = Process(target=req_handler.handle_reqs)
         p1.start()
