@@ -6,7 +6,6 @@ to the status item's button instead. A popover is a real window, so typing,
 scrolling and first-responder handling all work normally.
 """
 
-import threading
 import time
 
 import objc
@@ -23,6 +22,7 @@ from AppKit import (
     NSPopover,
     NSPopoverBehaviorTransient,
     NSScrollView,
+    NSTextAlignmentCenter,
     NSTextField,
     NSTextView,
     NSView,
@@ -33,8 +33,16 @@ from AppKit import (
     NSViewMinYMargin,
     NSTextFieldRoundedBezel,
 )
-from Foundation import NSMakeRect, NSMakeRange, NSMakeSize, NSObject
-from PyObjCTools import AppHelper
+from Foundation import (
+    NSMakeRect,
+    NSMakeRange,
+    NSMakeSize,
+    NSMutableAttributedString,
+    NSObject,
+    NSRunLoop,
+    NSRunLoopCommonModes,
+    NSTimer,
+)
 
 # NSMinYEdge -- makes the popover hang below the menu bar.
 MIN_Y_EDGE = 3
@@ -46,11 +54,19 @@ HEIGHT = 460
 PAD = 12
 INPUT_HEIGHT = 26
 HEADER_HEIGHT = 22
+ARROW_WIDTH = 18
+COUNTER_WIDTH = 84
 
 THINKING = "thinking…"
 
 # Seconds after a dismissal during which a status item click is ignored.
 REOPEN_GUARD = 0.35
+
+# How often the main thread drains the handler's reply queue.
+POLL_INTERVAL = 0.15
+
+# The chat the backend already holds when the panel comes up.
+INITIAL_CHAT_ID = 0
 
 
 def _body_attrs():
@@ -67,31 +83,50 @@ def _name_attrs(color):
     }
 
 
+def _chip(title, target, action):
+    button = NSButton.buttonWithTitle_target_action_(title, target, action)
+    button.setBezelStyle_(NSBezelStyleInline)
+    button.setFont_(NSFont.systemFontOfSize_(11))
+    button.setFocusRingType_(NSFocusRingTypeNone)
+    return button
+
+
 class ChatPanel(NSObject):
     """Owns the popover, the transcript view and the input field.
 
-    `responder` is a blocking ``str -> str`` callable (the LLM). It is run off
-    the main thread so the UI keeps drawing while the model thinks. `on_new_chat`
-    is called when the user starts over, and is what drops the old history.
+    The panel talks to the request handler through three callables, and never
+    blocks on any of them:
+
+    * ``responder(text, chat_id)`` -- hand a message to the handler and return
+      immediately. The reply comes back later, through ``poll``.
+    * ``on_new_chat() -> chat_id`` -- start a fresh conversation on the backend
+      and return the id it filed it under. Must return that id.
+    * ``poll() -> iterable of (chat_id, reply)`` -- drain whatever replies are
+      ready, without waiting. Called on a timer on the main thread.
+
+    Every conversation the backend holds is mirrored here as one entry in
+    ``_chats``, keyed by the same id, so a reply that lands while the user is
+    reading a different chat is still filed in the right transcript. The backend
+    is assumed to start with exactly one chat, ``INITIAL_CHAT_ID``.
     """
 
-    def initWithResponder_onNewChat_(self, responder, on_new_chat):
+    def initWithResponder_onNewChat_onPoll_(self, responder, on_new_chat, poll):
         self = objc.super(ChatPanel, self).init()
         if self is None:
             return None
 
         self._responder = responder
         self._on_new_chat = on_new_chat
-        self._busy = False
-        # Bumped on every new chat. A reply that was already in flight carries
-        # the generation it was asked under, and is dropped if that has moved on.
-        self._generation = 0
+        self._poll = poll
+        # chat_id -> entry, plus the order they were created in, which is the
+        # order the ‹ › buttons walk.
+        self._chats = {}
+        self._order = []
+        self._active = None
         # A transient popover dismisses itself on the same click that fires the
         # status item's action, so a click while open would close and instantly
         # reopen it. Remember when it closed and swallow that follow-up click.
         self._closed_at = 0.0
-        # Where the "thinking..." placeholder starts, so it can be cut out again.
-        self._pending_range = None
 
         root = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, WIDTH, HEIGHT))
 
@@ -108,10 +143,7 @@ class ChatPanel(NSObject):
         root.addSubview_(self._input)
 
         header_y = HEIGHT - PAD - HEADER_HEIGHT
-        new_chat = NSButton.buttonWithTitle_target_action_("New Chat", self, "newChat:")
-        new_chat.setBezelStyle_(NSBezelStyleInline)
-        new_chat.setFont_(NSFont.systemFontOfSize_(11))
-        new_chat.setFocusRingType_(NSFocusRingTypeNone)
+        new_chat = _chip("New Chat", self, "newChat:")
         new_chat.sizeToFit()
         size = new_chat.frame().size
         new_chat.setFrame_(
@@ -119,6 +151,29 @@ class ChatPanel(NSObject):
         )
         new_chat.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
         root.addSubview_(new_chat)
+
+        prev = _chip("‹", self, "prevChat:")
+        prev.setFrame_(NSMakeRect(PAD, header_y, ARROW_WIDTH, HEADER_HEIGHT))
+        prev.setAutoresizingMask_(NSViewMinYMargin)
+        root.addSubview_(prev)
+
+        counter_x = PAD + ARROW_WIDTH + 2
+        self._counter = NSTextField.labelWithString_("")
+        self._counter.setFont_(NSFont.systemFontOfSize_(11))
+        self._counter.setTextColor_(NSColor.secondaryLabelColor())
+        self._counter.setAlignment_(NSTextAlignmentCenter)
+        self._counter.setFrame_(
+            NSMakeRect(counter_x, header_y, COUNTER_WIDTH, HEADER_HEIGHT)
+        )
+        self._counter.setAutoresizingMask_(NSViewMinYMargin)
+        root.addSubview_(self._counter)
+
+        next_chat = _chip("›", self, "nextChat:")
+        next_chat.setFrame_(
+            NSMakeRect(counter_x + COUNTER_WIDTH + 2, header_y, ARROW_WIDTH, HEADER_HEIGHT)
+        )
+        next_chat.setAutoresizingMask_(NSViewMinYMargin)
+        root.addSubview_(next_chat)
 
         scroll_y = PAD + INPUT_HEIGHT + 8
         scroll = NSScrollView.alloc().initWithFrame_(
@@ -161,6 +216,17 @@ class ChatPanel(NSObject):
         self._popover.setAnimates_(True)
         self._popover.setDelegate_(self)
 
+        self._track(INITIAL_CHAT_ID)
+        self._activate(INITIAL_CHAT_ID)
+
+        # Replies are drained on the main thread, so `_deliver` can touch AppKit
+        # directly. The timer runs whether or not the popover is open -- a chat
+        # left in the background still has to collect its answer.
+        self._timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            POLL_INTERVAL, self, "tick:", None, True
+        )
+        NSRunLoop.currentRunLoop().addTimer_forMode_(self._timer, NSRunLoopCommonModes)
+
         return self
 
     # -- showing / hiding ---------------------------------------------------
@@ -196,94 +262,147 @@ class ChatPanel(NSObject):
     def popoverDidClose_(self, _notification):
         self._closed_at = time.monotonic()
 
-    # -- transcript ---------------------------------------------------------
+    # -- chats --------------------------------------------------------------
 
     def newChat_(self, _sender):
         self.new_chat()
 
+    def prevChat_(self, _sender):
+        self._step(-1)
+
+    def nextChat_(self, _sender):
+        self._step(1)
+
     @objc.python_method
     def new_chat(self):
-        """Wipe the transcript and the history behind it, and start over.
+        """Ask the backend for a fresh conversation and switch to it.
 
-        A reply that is still in flight belongs to the old conversation, so the
-        generation bump makes `_deliver` throw it away when it arrives.
+        The old transcript is kept, not wiped: a reply still in flight for it
+        arrives tagged with its chat id and lands where it belongs.
         """
-        self._generation += 1
-        self._busy = False
-        self._pending_range = None
-
-        storage = self._text.textStorage()
-        storage.deleteCharactersInRange_(NSMakeRange(0, storage.length()))
-
-        self._on_new_chat()
-
-        self._input.setStringValue_("")
-        self._input.setEnabled_(True)
-        window = self._text.window()
-        if window is not None:
-            window.makeFirstResponder_(self._input)
+        chat_id = self._on_new_chat()
+        if chat_id in self._chats:
+            # The backend handed back an id already in use; nothing sane to
+            # show, so just go there rather than shadowing the old transcript.
+            self._activate(chat_id)
+            return
+        self._track(chat_id)
+        self._activate(chat_id)
 
     @objc.python_method
-    def _append(self, name, name_color, body):
+    def _track(self, chat_id):
+        self._chats[chat_id] = {
+            "id": chat_id,
+            "transcript": NSMutableAttributedString.alloc().init(),
+            # Set while the handler owes this chat a reply.
+            "busy": False,
+            # Where this chat's "thinking..." placeholder sits, so it can be cut
+            # back out when the real answer lands.
+            "pending": None,
+            "draft": "",
+        }
+        self._order.append(chat_id)
+
+    @objc.python_method
+    def _step(self, delta):
+        if self._active is None:
+            return
+        index = self._order.index(self._active) + delta
+        if 0 <= index < len(self._order):
+            self._activate(self._order[index])
+
+    @objc.python_method
+    def _activate(self, chat_id):
+        """Swap the view over to `chat_id`, parking the current chat's draft."""
+        if self._active is not None and self._active in self._chats:
+            self._chats[self._active]["draft"] = self._input.stringValue()
+
+        self._active = chat_id
+        entry = self._chats[chat_id]
+
+        self._sync()
+        self._counter.setStringValue_(
+            "Chat %d/%d" % (self._order.index(chat_id) + 1, len(self._order))
+        )
+        self._input.setStringValue_(entry["draft"])
+        self._input.setEnabled_(not entry["busy"])
+
+        window = self._text.window()
+        if window is not None and not entry["busy"]:
+            window.makeFirstResponder_(self._input)
+
+    # -- transcript ---------------------------------------------------------
+
+    @objc.python_method
+    def _sync(self):
+        """Mirror the active chat's transcript into the text view."""
         storage = self._text.textStorage()
-        storage.beginEditing()
-        storage.appendAttributedString_(
+        storage.setAttributedString_(self._chats[self._active]["transcript"])
+        self._text.scrollRangeToVisible_(NSMakeRange(storage.length(), 0))
+
+    @objc.python_method
+    def _append(self, entry, name, name_color, body):
+        transcript = entry["transcript"]
+        transcript.beginEditing()
+        transcript.appendAttributedString_(
             NSAttributedString.alloc().initWithString_attributes_(
                 name + "\n", _name_attrs(name_color)
             )
         )
-        storage.appendAttributedString_(
+        transcript.appendAttributedString_(
             NSAttributedString.alloc().initWithString_attributes_(
                 body.strip() + "\n\n", _body_attrs()
             )
         )
-        storage.endEditing()
-        self._text.scrollRangeToVisible_(NSMakeRange(storage.length(), 0))
+        transcript.endEditing()
+        if entry["id"] == self._active:
+            self._sync()
 
-    # -- sending ------------------------------------------------------------
+    # -- sending / receiving ------------------------------------------------
 
     def send_(self, _sender):
         text = self._input.stringValue().strip()
-        if not text or self._busy:
+        entry = self._chats[self._active]
+        if not text or entry["busy"]:
             return
 
         self._input.setStringValue_("")
-        self._append("You", NSColor.secondaryLabelColor(), text)
+        entry["draft"] = ""
+        self._append(entry, "You", NSColor.secondaryLabelColor(), text)
 
-        start = self._text.textStorage().length()
-        self._append("Atreus", NSColor.controlAccentColor(), THINKING)
-        self._pending_range = NSMakeRange(start, self._text.textStorage().length() - start)
+        start = entry["transcript"].length()
+        self._append(entry, "Atreus", NSColor.controlAccentColor(), THINKING)
+        entry["pending"] = NSMakeRange(start, entry["transcript"].length() - start)
 
-        self._busy = True
+        entry["busy"] = True
         self._input.setEnabled_(False)
-        threading.Thread(
-            target=self._work, args=(text, self._generation), daemon=True
-        ).start()
+        # Fire and forget: the handler answers through `poll`, not by returning.
+        self._responder(text, entry["id"])
 
-    @objc.python_method
-    def _work(self, text, generation):
-        """Runs on a worker thread -- never touch AppKit from here."""
+    def tick_(self, _timer):
         try:
-            reply = self._responder(text)
+            replies = self._poll()
         except Exception as e:
-            reply = f"[error] {e}"
-        AppHelper.callAfter(self._deliver, reply, generation)
+            print(f"chat poll failed: {e!r}")
+            return
+        for chat_id, reply in replies or ():
+            self._deliver(chat_id, reply)
 
     @objc.python_method
-    def _deliver(self, reply, generation):
-        if generation != self._generation:
-            # Answer to a conversation the user has since thrown away.
+    def _deliver(self, chat_id, reply):
+        entry = self._chats.get(chat_id)
+        if entry is None:
+            # A conversation this panel never opened -- the voice agent's, say.
             return
-        if self._pending_range is not None:
-            self._text.textStorage().deleteCharactersInRange_(self._pending_range)
-            self._pending_range = None
-        self._append("Atreus", NSColor.controlAccentColor(), str(reply))
-        self._busy = False
-        # A transient popover dismisses itself on the same click that fires the
-        # status item's action, so a click while open would close and instantly
-        # reopen it. Remember when it closed and swallow that follow-up click.
-        self._closed_at = 0.0
-        self._input.setEnabled_(True)
-        window = self._text.window()
-        if window is not None:
-            window.makeFirstResponder_(self._input)
+
+        if entry["pending"] is not None:
+            entry["transcript"].deleteCharactersInRange_(entry["pending"])
+            entry["pending"] = None
+        self._append(entry, "Atreus", NSColor.controlAccentColor(), str(reply))
+        entry["busy"] = False
+
+        if chat_id == self._active:
+            self._input.setEnabled_(True)
+            window = self._text.window()
+            if window is not None:
+                window.makeFirstResponder_(self._input)

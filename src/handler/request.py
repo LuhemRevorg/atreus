@@ -1,6 +1,6 @@
 class Request:
-    def __init__(self, type, chat, message, id):
+
+    def __init__(self, type, message, id):
         self.type = type
-        self.chat = chat
         self.message = message
         self.id = id
