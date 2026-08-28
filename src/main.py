@@ -2,7 +2,6 @@ import itertools
 import logging
 import signal
 import sys
-from pathlib import Path
 from multiprocessing import Lock, Manager, Process, Queue
 from queue import Empty
 
@@ -22,7 +21,6 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 log = logging.getLogger("atreus")
-SYSTEM_PROMPT= (Path(__file__).parent / "SYSTEMPROMPT.txt").read_text(encoding="utf-8")
 
 def shutdown(signum, frame):
     log.info("got signal %s, exiting", signum)
@@ -77,13 +75,24 @@ def voice_session(text, chat_id, replies, req_queue, mic, speaker):
                 # Loaded here rather than up front: the handler is already
                 # working on the request, so the wait is free.
                 stt = STT()
-            res = replies.get()
+            # ttss arrives on the same queue ahead of the answer, so keep
+            # reading until the turn's actual reply shows up.
+            while True:
+                res = replies.get()
+                if not res.interim:
+                    break
+                log.info("meanwhile in %s: %s", chat_id, res.res)
+                with speaker:
+                    tts.res(res.res)
+
+            log.info("said in %s: %s", chat_id, res.res)
+            if res.res:
+                with speaker:
+                    tts.res(res.res)
             if res.end:
+                # end_conversation, spoken first and stopped after.
                 log.info("%s ended", chat_id)
                 break
-            log.info("said in %s: %s", chat_id, res.res)
-            with speaker:
-                tts.res(res.res)
             with mic.take():
                 text = stt.req()
             log.info("heard in %s: %s", chat_id, text)
@@ -113,6 +122,11 @@ def text_agent(req_queue, res_queue):
                 res = res_queue.get_nowait()
             except Empty:
                 break
+            if res.interim:
+                # ttss is a voice affordance; the panel has no way to show a
+                # half-turn without clearing the chat's pending state.
+                log.info("ignoring interim in chat %s: %s", res.id, res.res)
+                continue
             log.info("replied in chat %s: %s", res.id, res.res)
             replies.append((res.id, res.res))
         return replies

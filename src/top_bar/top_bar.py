@@ -17,7 +17,7 @@ from Foundation import NSObject
 from .chat_panel import INITIAL_CHAT_ID, ChatPanel
 
 ICON_PATH = str(Path(__file__).parent / ".." / ".." / "assets" / "atreus_shoot_8x_1.png")
-SYSTEM_PROMPT = (Path(__file__).parent / ".." / "SYSTEMPROMPT.txt").read_text(encoding="utf-8")
+SYSTEM_PROMPT = (Path(__file__).parent / ".." / "TEXTPROMPT.txt").read_text(encoding="utf-8")
 
 
 def _default_backend():

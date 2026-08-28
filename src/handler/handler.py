@@ -1,11 +1,21 @@
 from pathlib import Path
 
-from llama import llama
+from llama import channel, llama
 
 from .request import DELETE_CHAT, Request
 from .response import Response
 
-SYSTEM_PROMPT = (Path(__file__).parent / ".." / "SYSTEMPROMPT.txt").read_text(encoding="utf-8")
+PROMPTS = {
+    "text": (Path(__file__).parent / ".." / "TEXTPROMPT.txt").read_text(encoding="utf-8"),
+    "voice": (Path(__file__).parent / ".." / "VOICEPROMPT.txt").read_text(encoding="utf-8"),
+}
+
+
+def ended(messages):
+    return any(
+        isinstance(m, dict) and m.get("tool_name") == "end_conversation"
+        for m in messages
+    )
 
 
 class Handler:
@@ -26,18 +36,24 @@ class Handler:
                 self.delete_chat(req.id)
                 continue
             chat = self.chats.setdefault(
-                req.id, [{"role": "system", "content": SYSTEM_PROMPT}]
+                req.id, [{"role": "system", "content": PROMPTS[req.type]}]
             )
-            end = False
+            turn = len(chat)
+            # How ttss reaches this request while the turn is still running. It
+            # goes back the same way the answer does, so the caller says one
+            # thing at a time instead of talking over itself.
+            channel.bind(
+                lambda text: self.reply(
+                    req, Response(res=text, id=req.id, interim=True)
+                )
+            )
             try:
                 res = llama(req.message, chat)
-            except TimeoutError:
-                # end_conversation raises out through llama's tool pool as a
-                # bare TimeoutError. Nothing to say -- the session just stops.
-                res, end = None, True
             except Exception as e:
                 res = f"[error] {e}"
-            self.reply(req, Response(res=res, id=req.id, end=end))
+            finally:
+                channel.bind(None)
+            self.reply(req, Response(res=res, id=req.id, end=ended(chat[turn:])))
 
     def reply(self, req, res):
         if req.reply_to is not None:
