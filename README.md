@@ -14,6 +14,42 @@ P.S. Atreus is GoW reference
 ./scripts/setup.sh
 ```
 
+## What Atreus may run
+
+The bash tool is driven by an 8b model reading speech-to-text, so a command can
+be wrong twice over before it reaches a shell. Commands are sorted into three
+tiers by `src/llama/tools/bash_policy.py`:
+
+| tier | what it covers | what happens |
+|---|---|---|
+| refused | disk formats, `rm -rf ~`, fork bombs, disabling SIP | never runs |
+| read-only | `ls`, `cat`, `df`, `git status`, `pmset -g batt` and friends | runs straight away |
+| everything else | anything that writes, installs, deletes or elevates | a dialog asks you first |
+
+The read-only tier is judged on the whole line, not the first word: `ls; rm -rf ~`
+is not an `ls`, and a redirection, a backtick or a `$(...)` drops a command to
+the ask tier on its own. Reads of credentials -- `.ssh`, `.env`, keychains --
+also ask, because their output ends up in the model's context and out of the
+speaker.
+
+Set `ATREUS_BASH_POLICY` to pick what the ask tier does:
+
+| value | behaviour |
+|---|---|
+| `ask` | default -- approve each one in a dialog |
+| `strict` | refuse anything that is not read-only, no prompt. For a Mac left logged in with nobody in front of it |
+| `open` | no prompts, refused list only. The old behaviour |
+
+To set it for the daemon, add it to `scripts/atreus.sh` next to the other
+exports, then `launchctl kickstart -k gui/$(id -u)/com.atreus.agent`.
+
+None of this is a sandbox -- an approved command runs as you, with your access.
+It is there so that a mishearing cannot approve itself.
+
+```
+python3 tests/test_bash_policy.py
+```
+
 ## Running as a daemon
 
 Atreus runs as a launchd **user agent** (not a system daemon) -- it needs the
