@@ -1,4 +1,4 @@
-from tts import TTS
+from ..channel import say
 
 def ttss(text: str):
     '''
@@ -22,5 +22,6 @@ def ttss(text: str):
             when it's done." It is read aloud verbatim, so no markdown, lists or
             code.
     '''
-    tts = TTS()
-    tts.res(text)
+    if not say(text):
+        return "Not said: this turn has nobody listening to it."
+    return "Said."

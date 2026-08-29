@@ -1,4 +1,5 @@
 import collections
+import os
 import wave
 
 import numpy as np
@@ -23,6 +24,8 @@ MIN_THRESHOLD = 300.0       # floor for a dead-quiet room (int16 RMS)
 class STT:
     def __init__(self):
         self.recorder = wmlx.load_model("mlx-community/whisper-small-mlx", device="cpu")
+        # Voice sessions record side by side, so the scratch file cannot be shared.
+        self.wav = f"what_i_said-{os.getpid()}.wav"
 
     def __rms(self, data):
         samples = np.frombuffer(data, dtype=np.int16).astype(np.float32)
@@ -88,12 +91,14 @@ class STT:
         return started
 
     def req(self):
+        """Record one utterance and transcribe it. Empty string if nothing was said."""
         print("Speak now")
-        if not self.__record('what_i_said.wav'):
-            return {"text": ""}
-        result = self.recorder.transcribe('what_i_said.wav', language='en')
+        if not self.__record(self.wav):
+            return ""
+        result = self.recorder.transcribe(self.wav, language='en')
         print(result)
-        return result['segments'][0]['text']
+        segments = result.get('segments') or []
+        return segments[0]['text'] if segments else ""
 
     
     def shutdown(self):
